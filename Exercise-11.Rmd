@@ -1,0 +1,81 @@
+---
+title: "Exercise-11"
+author: "Alexandra Anderson"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+packages <- c("biscale", "car", "cleangeo", "cowplot", "geosphere", "maps", 
+              "mapproj", "maptools", "spatialreg", "spdep", "tidyverse","visreg", "sp", "maps")
+sapply(packages, require, character.only=T)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+data <- read.csv('https://raw.githubusercontent.com/chrismgentry/Spatial-Regression/master/Data/childpov18_southfull.csv', 
+                 colClasses = c("character", "character", "character", 
+                                "numeric", "numeric", "numeric", "numeric",
+                                "numeric", "numeric", "numeric", "numeric",
+                                "numeric", "numeric", "numeric", "numeric", 
+                                "numeric", "numeric", "numeric", "numeric",
+                                "numeric", "numeric", "numeric", "numeric",
+                                "numeric", "numeric", "numeric", "numeric", 
+                                "numeric", "numeric", "numeric", "numeric",
+                                "numeric", "numeric", "numeric", "numeric"))
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r change name, echo=FALSE}
+names(data)[names(data)=="X2016.child.poverty"] <- "child.pov.2016"
+```
+
+
+```{r pressure, echo=FALSE}
+md_pov <- data %>% subset(State == "MD")
+```
+
+```{r summary}
+summary(md_pov)
+```
+
+```{r equation}
+equation <- child.pov.2016 ~ rural + urban + lnmanufacturing + lnag + 
+  lnretail + lnhealthss + lnconstruction + lnlesshs + 
+  lnunemployment + lnsinglemom + lnblack + lnhispanic + 
+  lnuninsured + lnincome_ratio + lnteenbirth + lnunmarried
+options(scipen = 5)
+```
+
+```{r ols}
+ols <- lm(equation, data=md_pov)
+summary(ols)
+```
+```{r visual}
+par(mfrow=c(4,4), mar=c(2, 2, 2, 2))
+visreg(ols)
+```
+
+```{r}
+fips <- county.fips
+fips.codes <- separate(data = fips, col = polyname, into = c("state", "county"), sep = ",")
+md_fips <- subset(fips.codes, state=="maryland", select=fips)
+
+maryland <- maps::map(database = "county", regions = "maryland", fill=T, plot=F)
+md_sp = map2SpatialPolygons(maryland,md_fips$fips,CRS("+proj=longlat"))
+```
+```{r}
+cleaned <- clgeo_Clean(md_sp)
+neighb.data <- poly2nb(cleaned, queen=T)
+cont.neighb <- nb2listw(neighb.data,style="W", zero.policy = TRUE)
+```
+

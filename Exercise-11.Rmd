@@ -7,8 +7,11 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-packages <- c("biscale", "car", "cleangeo", "cowplot", "geosphere", "maps", 
-              "mapproj", "maptools", "spatialreg", "spdep", "tidyverse","visreg", "sp", "maps")
+packages <- c("biscale", "car", "cleangeo", "cowplot", "geosphere", "maps",
+
+"mapproj", "spatialreg", "spdep", "sf", "tidyverse","visreg")
+library(spatialreg)
+
 sapply(packages, require, character.only=T)
 ```
 
@@ -19,63 +22,249 @@ This is an R Markdown document. Markdown is a simple formatting syntax for autho
 When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
 
 ```{r cars}
-data <- read.csv('https://raw.githubusercontent.com/chrismgentry/Spatial-Regression/master/Data/childpov18_southfull.csv', 
-                 colClasses = c("character", "character", "character", 
-                                "numeric", "numeric", "numeric", "numeric",
-                                "numeric", "numeric", "numeric", "numeric",
-                                "numeric", "numeric", "numeric", "numeric", 
-                                "numeric", "numeric", "numeric", "numeric",
-                                "numeric", "numeric", "numeric", "numeric",
-                                "numeric", "numeric", "numeric", "numeric", 
-                                "numeric", "numeric", "numeric", "numeric",
-                                "numeric", "numeric", "numeric", "numeric"))
+data <- read.csv('https://raw.githubusercontent.com/chrismgentry/Spatial-Regression/master/Data/childpov18_southfull.csv',
+
+colClasses = c("character", "character", "character",
+
+"numeric", "numeric", "numeric", "numeric",
+
+"numeric", "numeric", "numeric", "numeric",
+
+"numeric", "numeric", "numeric", "numeric",
+
+"numeric", "numeric", "numeric", "numeric",
+
+"numeric", "numeric", "numeric", "numeric",
+
+"numeric", "numeric", "numeric", "numeric",
+
+"numeric", "numeric", "numeric", "numeric",
+
+"numeric", "numeric", "numeric", "numeric"))
+
+names(data)[names(data)=="X2016.child.poverty"] <- "child.pov.2016"
+
+AR_pov <- data %>% subset(State == "KY")
+
+summary(AR_pov)
 ```
 
 ## Including Plots
 
 You can also embed plots, for example:
 
-```{r change name, echo=FALSE}
-names(data)[names(data)=="X2016.child.poverty"] <- "child.pov.2016"
-```
 
-
-```{r pressure, echo=FALSE}
-md_pov <- data %>% subset(State == "MD")
-```
-
-```{r summary}
-summary(md_pov)
-```
 
 ```{r equation}
-equation <- child.pov.2016 ~ rural + urban + lnmanufacturing + lnag + 
-  lnretail + lnhealthss + lnconstruction + lnlesshs + 
-  lnunemployment + lnsinglemom + lnblack + lnhispanic + 
-  lnuninsured + lnincome_ratio + lnteenbirth + lnunmarried
-options(scipen = 5)
+equation <- child.pov.2016 ~ rural + urban + lnmanufacturing + lnag +
+
+lnretail + lnhealthss + lnconstruction + lnlesshs +
+
+lnunemployment + lnsinglemom + lnblack + lnhispanic +
+
+lnuninsured + lnincome_ratio + lnteenbirth + lnunmarried
 ```
 
 ```{r ols}
-ols <- lm(equation, data=md_pov)
+options(scipen = 5)
+
+ols <- lm(equation, data=AR_pov)
+
 summary(ols)
 ```
+
 ```{r visual}
 par(mfrow=c(4,4), mar=c(2, 2, 2, 2))
 visreg(ols)
 ```
 
-```{r}
+```{r flips}
 fips <- county.fips
-fips.codes <- separate(data = fips, col = polyname, into = c("state", "county"), sep = ",")
-md_fips <- subset(fips.codes, state=="maryland", select=fips)
 
-maryland <- maps::map(database = "county", regions = "maryland", fill=T, plot=F)
-md_sp = map2SpatialPolygons(maryland,md_fips$fips,CRS("+proj=longlat"))
-```
-```{r}
-cleaned <- clgeo_Clean(md_sp)
-neighb.data <- poly2nb(cleaned, queen=T)
+fips.codes <- separate(data = fips, col = polyname, into = c("state", "county"), sep = ",")
+
+md_fips <- subset(fips.codes, state=="kentucky", select=fips)
+
+#library(sf)
+
+se_shp <- st_read(file.path("se_counties/se_counties.shp"))
+
+AR_sf <- se_shp %>% subset(STATE_NAME == "Kentucky")
+
+#library(spdep)
+sf_use_s2(FALSE)
+
+neighb.data <- poly2nb(AR_sf, queen=T)
+
 cont.neighb <- nb2listw(neighb.data,style="W", zero.policy = TRUE)
+
+```
+
+
+```{r moran test}
+lm.morantest(ols, cont.neighb)
+```
+
+```{r lm test}
+lm.LMtests(ols, cont.neighb, test="all")
+```
+
+```{r SLX model}
+SLX.model <- spatialreg::lmSLX(equation, data=AR_pov, cont.neighb)
+summary(SLX.model)
+
+summary(spatialreg::impacts(SLX.model, cont.neighb), zstats = TRUE)[["pzmat"]]
+
+sp.lag.model <- spatialreg::lagsarlm(equation, data=AR_pov, cont.neighb)
+summary(sp.lag.model, Nagelkerke = TRUE)
+
+```
+
+
+```{r lag model}
+sp.lag.model <- spatialreg::lagsarlm(equation, data=AR_pov, cont.neighb)
+summary(sp.lag.model, Nagelkerke = TRUE)
+```
+
+```{r lag summary}
+summary(spatialreg::impacts(sp.lag.model, listw = cont.neighb, R=100), zstats = TRUE)[["pzmat"]]
+```
+
+```{r error model}
+sp.err.model <- spatialreg::errorsarlm(equation, data=AR_pov, cont.neighb)
+summary(sp.err.model, Nagelkerke = TRUE)
+```
+
+```{r error model test}
+spatialreg::Hausman.test(sp.err.model)
+```
+
+```{r standard error}
+sd.err <- spatialreg::errorsarlm(equation, AR_pov, cont.neighb, etype = "emixed")
+sdm <- spatialreg::lagsarlm(equation, AR_pov, cont.neighb, type = "mixed")
+
+```
+
+```{r standard error test}
+summary(spatialreg::impacts(sd.err, listw = cont.neighb, R = 100), zstats = TRUE)[["pzmat"]]
+```
+
+```{r likelihood ratio}
+LR.Sarlm(sd.err,sp.err.model)
+```
+
+```{r k neighbors}
+AR.xy <- st_centroid(AR_sf)
+
+#Create neighbors
+all.dist.k1 <- knn2nb(knearneigh(AR.xy, k=1, longlat = TRUE))
+all.dist.k3 <- knn2nb(knearneigh(AR.xy, k=3, longlat = TRUE))
+all.dist.k5 <- knn2nb(knearneigh(AR.xy, k=5, longlat = TRUE))
+
+
+#Determine max k distance value to neighbor
+all.max.k1 <- max(unlist(nbdists(all.dist.k1, AR.xy, longlat=TRUE)))
+all.max.k3 <- max(unlist(nbdists(all.dist.k3, AR.xy, longlat=TRUE)))
+all.max.k5 <- max(unlist(nbdists(all.dist.k5, AR.xy, longlat=TRUE)))
+
+
+all.sp.dist.k1 <- dnearneigh(AR.xy, d1=0, d2=1 * all.max.k1, longlat = TRUE)
+all.sp.dist.k3 <- dnearneigh(AR.xy, d1=0, d2=1 * all.max.k3, longlat = TRUE)
+all.sp.dist.k5 <- dnearneigh(AR.xy, d1=0, d2=1 * all.max.k5, longlat = TRUE)
+
+#Create neighbor list
+all.dist.neighb.k1 <- nb2listw(all.sp.dist.k1,style="W", zero.policy = TRUE)
+all.dist.neighb.k3 <- nb2listw(all.sp.dist.k3,style="W", zero.policy = TRUE)
+all.dist.neighb.k5 <- nb2listw(all.sp.dist.k5,style="W", zero.policy = TRUE)
+
+```
+
+```{r distance lag model}
+#Calculate neighbors based on distance
+all.dist.lag.k1 <- spatialreg::lagsarlm(equation, data = AR_pov, listw = all.dist.neighb.k1)
+all.dist.lag.k3 <- spatialreg::lagsarlm(equation, data = AR_pov, listw = all.dist.neighb.k3)
+all.dist.lag.k5 <- spatialreg::lagsarlm(equation, data = AR_pov, listw = all.dist.neighb.k5)
+summary(all.dist.lag.k1, Nagelkerke = TRUE)
+```
+
+
+
+```{r distance error}
+all.dist.err.k1 <- spatialreg::errorsarlm(equation, data = AR_pov, listw = all.dist.neighb.k1)
+all.dist.err.k3 <- spatialreg::errorsarlm(equation, data = AR_pov, listw = all.dist.neighb.k3)
+all.dist.err.k5 <- spatialreg::errorsarlm(equation, data = AR_pov, listw = all.dist.neighb.k5)
+
+summary(all.dist.err.k1, Nagelkerke = TRUE)
+
+```
+
+```{r setting up map}
+dist.err.data <- summary(all.dist.err.k1, correlation=TRUE, Nagelkerke = TRUE)
+
+dist.err.output <- cbind.data.frame(AR_pov$FIPS,
+                                    dist.err.data$fitted.values, 
+                                    dist.err.data$residual, 
+                                    AR_pov$child.pov.2016, 
+                                    AR_pov$lnsinglemom, 
+                                    AR_pov$lnuninsured, 
+                                    AR_pov$lnlesshs, 
+                                    AR_pov$lnincome_ratio,
+                                    stringsAsFactors = FALSE)
+
+#Renaming columns
+colnames(dist.err.output) <- c("fips","fitted","resid","childpov",
+                               "single_mom","uninsured","less_hs","income_ratio")
+AR_fortify <- fortify(AR_sf)
+
+AR_poly <- merge(x = AR_fortify, y = dist.err.output, 
+                 by.x = "FIPS", by.y = "fips", all = TRUE)
+
+```
+
+```{r ready for gg plot}
+
+
+bivariate_data <- bi_class(AR_poly, x = childpov, y = single_mom, 
+                           dim = 3, style = "quantile")
+
+legend <- bi_legend(pal = "DkViolet",
+                    dim = 3,
+                    xlab = "Child Poverty",
+                    ylab = "Single Mother\n Households",
+                    size = 6)
+
+world <- map_data("world")
+states <- map_data("state")
+southern_states <- subset(states, region %in% 
+                            c("texas", "arkansas", "louisiana", "mississippi", 
+                              "alabama", "georgia", "florida", "north carolina",
+                              "south carolina", "tennessee", "oklahoma", 
+                              "kentucky", "west virginia", "virginia", 
+                              "maryland", "delaware", "district of columbia"))
+
+```
+
+```{r plot 1}
+mom_pov_map <- ggplot() + 
+  geom_polygon(data = world, aes(x=long,y=lat, group=group), fill = "gray95", color = "white") +
+  geom_polygon(data = states, aes(x=long,y=lat, group=group), fill = "gray", color = "white") +
+  geom_polygon(data = southern_states, aes(x=long,y=lat, group=group), fill = NA, size = 0.01, color = "white") +  
+  geom_sf(data = bivariate_data, aes(fill = bi_class), color = "grey50", show.legend = FALSE) + 
+  bi_scale_fill(pal = "DkViolet", dim = 3) +
+  coord_sf(crs = 4326, xlim=c(-80,-90), ylim=c(30,40)) +
+  theme_void() + theme(legend.title.align=0.5) +
+  theme(panel.background = element_rect(fill = 'deepskyblue'),
+        panel.grid.major = element_line(colour = NA)) +
+  labs(x = "Longitude", y = "Latitude", fill = "Child Poverty", 
+       title = "Bivariate Map of Child Poverty and Single Mother Households") +
+  theme(plot.title = element_text(face = "bold", hjust = 0.5))
+mom_pov_map
+```
+
+```{r final map}
+final_map <- ggdraw() +
+  draw_plot(mom_pov_map, 0, 0, 1, 1) +
+  draw_plot(legend, 0.625, 0.025, 0.25, 0.25)
+final_map
 ```
 

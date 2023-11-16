@@ -15,13 +15,10 @@ library(spatialreg)
 sapply(packages, require, character.only=T)
 ```
 
-## R Markdown
+## Yay Torture
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
+```{r cars, include=FALSE}
 data <- read.csv('https://raw.githubusercontent.com/chrismgentry/Spatial-Regression/master/Data/childpov18_southfull.csv',
 
 colClasses = c("character", "character", "character",
@@ -49,13 +46,10 @@ AR_pov <- data %>% subset(State == "KY")
 summary(AR_pov)
 ```
 
-## Including Plots
-
-You can also embed plots, for example:
 
 
 
-```{r equation}
+```{r equation, include=FALSE}
 equation <- child.pov.2016 ~ rural + urban + lnmanufacturing + lnag +
 
 lnretail + lnhealthss + lnconstruction + lnlesshs +
@@ -64,6 +58,9 @@ lnunemployment + lnsinglemom + lnblack + lnhispanic +
 
 lnuninsured + lnincome_ratio + lnteenbirth + lnunmarried
 ```
+
+## OLS Analysis
+How all independent variables relate to child poverty.
 
 ```{r ols}
 options(scipen = 5)
@@ -78,7 +75,7 @@ par(mfrow=c(4,4), mar=c(2, 2, 2, 2))
 visreg(ols)
 ```
 
-```{r flips}
+```{r flips, include=FALSE}
 fips <- county.fips
 
 fips.codes <- separate(data = fips, col = polyname, into = c("state", "county"), sep = ",")
@@ -99,29 +96,34 @@ neighb.data <- poly2nb(AR_sf, queen=T)
 cont.neighb <- nb2listw(neighb.data,style="W", zero.policy = TRUE)
 
 ```
-
+## Moran's Correlation
+Examining residuals of OLS regression. P value is not significant so that means there is no spatial dependency. 
 
 ```{r moran test}
 lm.morantest(ols, cont.neighb)
 ```
-
+## LaGrange Multiplier
+Tests different models and compares them to find the best one. None are statistically significant. 
 ```{r lm test}
 lm.LMtests(ols, cont.neighb, test="all")
 ```
 
+
+## SLX Model
+Do just our neighbors have an impact?
 ```{r SLX model}
 SLX.model <- spatialreg::lmSLX(equation, data=AR_pov, cont.neighb)
 summary(SLX.model)
 
 summary(spatialreg::impacts(SLX.model, cont.neighb), zstats = TRUE)[["pzmat"]]
 
-sp.lag.model <- spatialreg::lagsarlm(equation, data=AR_pov, cont.neighb)
-summary(sp.lag.model, Nagelkerke = TRUE)
-
 ```
 
+## Spatial Lag Model
+Our neighbor's value affects both us and our neighbor. 
 
 ```{r lag model}
+
 sp.lag.model <- spatialreg::lagsarlm(equation, data=AR_pov, cont.neighb)
 summary(sp.lag.model, Nagelkerke = TRUE)
 ```
@@ -129,15 +131,33 @@ summary(sp.lag.model, Nagelkerke = TRUE)
 ```{r lag summary}
 summary(spatialreg::impacts(sp.lag.model, listw = cont.neighb, R=100), zstats = TRUE)[["pzmat"]]
 ```
-
+## Spatial Error Model
+Unexplained error function. High residuals mean missing explanatory variable may be spatially correlated. Teen birth and single mom are significant. Lamda is also significant
 ```{r error model}
 sp.err.model <- spatialreg::errorsarlm(equation, data=AR_pov, cont.neighb)
 summary(sp.err.model, Nagelkerke = TRUE)
 ```
 
+## Comparing Models for Contiguity
+SLX:
+Adjusted R-squared:  0.6343 
+p-value: 4.443e-14
+
+Lag:
+Nagelkerke pseudo-R-squared: 0.67113
+p-value: 0.10203
+
+Err:
+Nagelkerke pseudo-R-squared: 0.67867 
+p-value: 0.0087167
+
+## Hausman Test
+Do the results of the analysis verify use of the model? 
+
 ```{r error model test}
 spatialreg::Hausman.test(sp.err.model)
 ```
+## Spatial Durbin Model
 
 ```{r standard error}
 sd.err <- spatialreg::errorsarlm(equation, AR_pov, cont.neighb, etype = "emixed")
@@ -153,7 +173,7 @@ summary(spatialreg::impacts(sd.err, listw = cont.neighb, R = 100), zstats = TRUE
 LR.Sarlm(sd.err,sp.err.model)
 ```
 
-```{r k neighbors}
+```{r k neighbors, message=FALSE, warning=FALSE, include=FALSE}
 AR.xy <- st_centroid(AR_sf)
 
 #Create neighbors
@@ -178,6 +198,7 @@ all.dist.neighb.k3 <- nb2listw(all.sp.dist.k3,style="W", zero.policy = TRUE)
 all.dist.neighb.k5 <- nb2listw(all.sp.dist.k5,style="W", zero.policy = TRUE)
 
 ```
+## Distance Lag model
 
 ```{r distance lag model}
 #Calculate neighbors based on distance
@@ -188,6 +209,7 @@ summary(all.dist.lag.k1, Nagelkerke = TRUE)
 ```
 
 
+## Distance Error Model
 
 ```{r distance error}
 all.dist.err.k1 <- spatialreg::errorsarlm(equation, data = AR_pov, listw = all.dist.neighb.k1)
@@ -198,7 +220,7 @@ summary(all.dist.err.k1, Nagelkerke = TRUE)
 
 ```
 
-```{r setting up map}
+```{r setting up map, message=FALSE, warning=FALSE, include=FALSE}
 dist.err.data <- summary(all.dist.err.k1, correlation=TRUE, Nagelkerke = TRUE)
 
 dist.err.output <- cbind.data.frame(AR_pov$FIPS,
@@ -221,7 +243,7 @@ AR_poly <- merge(x = AR_fortify, y = dist.err.output,
 
 ```
 
-```{r ready for gg plot}
+```{r ready for gg plot, message=FALSE, warning=FALSE, include=FALSE}
 
 
 bivariate_data <- bi_class(AR_poly, x = childpov, y = single_mom, 
@@ -244,7 +266,7 @@ southern_states <- subset(states, region %in%
 
 ```
 
-```{r plot 1}
+```{r plot 1, echo=FALSE, message=FALSE, warning=FALSE}
 mom_pov_map <- ggplot() + 
   geom_polygon(data = world, aes(x=long,y=lat, group=group), fill = "gray95", color = "white") +
   geom_polygon(data = states, aes(x=long,y=lat, group=group), fill = "gray", color = "white") +
